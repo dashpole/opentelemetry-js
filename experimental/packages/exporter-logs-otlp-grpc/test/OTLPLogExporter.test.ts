@@ -12,6 +12,9 @@ import { OTLPLogExporter } from '../src';
 import type { ServerTestContext } from './utils';
 import { startServer, TestMetricReader } from './utils';
 import * as assert from 'assert';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 
 const testServiceDefinition = {
   export: {
@@ -99,5 +102,58 @@ describe('OTLPLogExporter', function () {
     );
     assert.ok(scopeMetrics);
     await meterProvider.shutdown();
+  });
+
+  it('exports logs using OAuth2Authenticator with gRPC metadata', async () => {
+    const oauthServer = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        Connection: 'close',
+      });
+      res.end(
+        JSON.stringify({
+          access_token: 'logs-grpc-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        })
+      );
+    });
+    await new Promise<void>(resolve =>
+      oauthServer.listen(0, '127.0.0.1', resolve)
+    );
+    const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+    try {
+      const authenticator = new OAuth2Authenticator({
+        tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+        clientId: 'logs-grpc-client',
+        clientSecret: 'logs-grpc-secret',
+      });
+
+      const loggerProvider = new LoggerProvider({
+        processors: [
+          new SimpleLogRecordProcessor({
+            exporter: new OTLPLogExporter({
+              url: 'http://localhost:1503',
+              authenticator,
+            }),
+          }),
+        ],
+      });
+
+      loggerProvider.getLogger('test-logger').emit({
+        body: 'auth-log-body',
+      });
+      await loggerProvider.shutdown();
+
+      assert.strictEqual(serverTestContext.requests.length, 1);
+      assert.deepStrictEqual(
+        serverTestContext.requests[0].metadata.get('authorization'),
+        ['Bearer logs-grpc-token']
+      );
+    } finally {
+      oauthServer.closeAllConnections();
+      await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+    }
   });
 });

@@ -5,10 +5,13 @@
 
 import * as assert from 'assert';
 import * as http from 'http';
+import { syncBuiltinESMExports } from 'module';
+import type { AddressInfo } from 'net';
 import * as sinon from 'sinon';
 
 import { AggregationTemporalityPreference } from '../../src';
 import { OTLPMetricExporter } from '../../src/platform/node';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 import type { AggregationOption } from '@opentelemetry/sdk-metrics';
 import {
   AggregationTemporality,
@@ -173,6 +176,7 @@ describe('OTLPMetricExporter', () => {
   describe('export', () => {
     afterEach(() => {
       sinon.restore();
+      syncBuiltinESMExports();
     });
 
     it('successfully exports data', function (done) {
@@ -245,6 +249,88 @@ describe('OTLPMetricExporter', () => {
 
       // act
       meterProvider.forceFlush();
+    });
+
+    it('exports metrics using OAuth2Authenticator against local OAuth2 and OTLP servers', async () => {
+      const oauthServer = http.createServer((_req, res) => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(
+          JSON.stringify({
+            access_token: 'metrics-http-token',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          })
+        );
+      });
+      await new Promise<void>(resolve =>
+        oauthServer.listen(0, '127.0.0.1', resolve)
+      );
+      const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+      let receivedAuthHeader: string | undefined;
+      let receivedBody = '';
+      const collectorServer = http.createServer((req, res) => {
+        receivedAuthHeader = req.headers['authorization'];
+        const chunks: Buffer[] = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          receivedBody = Buffer.concat(chunks).toString('utf8');
+          if (receivedAuthHeader !== 'Bearer metrics-http-token') {
+            res.writeHead(401, { Connection: 'close' });
+            res.end();
+            return;
+          }
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            Connection: 'close',
+          });
+          res.end('{}');
+        });
+      });
+      await new Promise<void>(resolve =>
+        collectorServer.listen(0, '127.0.0.1', resolve)
+      );
+      const collectorPort = (collectorServer.address() as AddressInfo).port;
+
+      try {
+        const authenticator = new OAuth2Authenticator({
+          tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+          clientId: 'metrics-http-client',
+          clientSecret: 'metrics-http-secret',
+        });
+
+        const exporter = new OTLPMetricExporter({
+          url: `http://127.0.0.1:${collectorPort}/v1/metrics`,
+          authenticator,
+        });
+        const meterProvider = new MeterProvider({
+          readers: [
+            new PeriodicExportingMetricReader({
+              exporter,
+            }),
+          ],
+        });
+
+        meterProvider
+          .getMeter('test-meter')
+          .createCounter('auth-counter')
+          .add(1);
+        await meterProvider.forceFlush();
+        await meterProvider.shutdown();
+
+        assert.strictEqual(receivedAuthHeader, 'Bearer metrics-http-token');
+        assert.ok(JSON.parse(receivedBody));
+      } finally {
+        oauthServer.closeAllConnections();
+        collectorServer.closeAllConnections();
+        await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+        await new Promise<void>(resolve =>
+          collectorServer.close(() => resolve())
+        );
+      }
     });
   });
 });

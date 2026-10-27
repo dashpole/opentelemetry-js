@@ -5,9 +5,12 @@
 
 import * as assert from 'assert';
 import * as http from 'http';
+import { syncBuiltinESMExports } from 'module';
+import type { AddressInfo } from 'net';
 import * as sinon from 'sinon';
 
 import { OTLPMetricExporter } from '../../src/platform/node';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 import {
   MeterProvider,
   PeriodicExportingMetricReader,
@@ -26,6 +29,7 @@ describe('OTLPMetricExporter', () => {
   describe('export', () => {
     afterEach(() => {
       sinon.restore();
+      syncBuiltinESMExports();
     });
 
     it('successfully exports data', function (done) {
@@ -98,6 +102,85 @@ describe('OTLPMetricExporter', () => {
 
       // act
       meterProvider.forceFlush();
+    });
+
+    it('exports metrics using OAuth2Authenticator against local OAuth2 and OTLP Protobuf servers', async () => {
+      const oauthServer = http.createServer((_req, res) => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(
+          JSON.stringify({
+            access_token: 'metrics-proto-token',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          })
+        );
+      });
+      await new Promise<void>(resolve =>
+        oauthServer.listen(0, '127.0.0.1', resolve)
+      );
+      const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+      let receivedAuthHeader: string | undefined;
+      let receivedBytes = 0;
+      const collectorServer = http.createServer((req, res) => {
+        receivedAuthHeader = req.headers['authorization'];
+        const chunks: Buffer[] = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          receivedBytes = Buffer.concat(chunks).length;
+          if (receivedAuthHeader !== 'Bearer metrics-proto-token') {
+            res.writeHead(401, { Connection: 'close' });
+            res.end();
+            return;
+          }
+          res.writeHead(200, { Connection: 'close' });
+          res.end();
+        });
+      });
+      await new Promise<void>(resolve =>
+        collectorServer.listen(0, '127.0.0.1', resolve)
+      );
+      const collectorPort = (collectorServer.address() as AddressInfo).port;
+
+      try {
+        const authenticator = new OAuth2Authenticator({
+          tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+          clientId: 'metrics-proto-client',
+          clientSecret: 'metrics-proto-secret',
+        });
+
+        const exporter = new OTLPMetricExporter({
+          url: `http://127.0.0.1:${collectorPort}/v1/metrics`,
+          authenticator,
+        });
+        const meterProvider = new MeterProvider({
+          readers: [
+            new PeriodicExportingMetricReader({
+              exporter,
+            }),
+          ],
+        });
+
+        meterProvider
+          .getMeter('test-meter')
+          .createCounter('auth-counter')
+          .add(1);
+        await meterProvider.forceFlush();
+        await meterProvider.shutdown();
+
+        assert.strictEqual(receivedAuthHeader, 'Bearer metrics-proto-token');
+        assert.ok(receivedBytes > 0);
+      } finally {
+        oauthServer.closeAllConnections();
+        collectorServer.closeAllConnections();
+        await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+        await new Promise<void>(resolve =>
+          collectorServer.close(() => resolve())
+        );
+      }
     });
   });
 });

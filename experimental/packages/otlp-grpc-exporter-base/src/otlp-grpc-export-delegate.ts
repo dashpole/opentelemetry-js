@@ -75,6 +75,7 @@ export function createOtlpGrpcExportDelegate<Internal, Response>(
       credentials: options.credentials,
       metadata: options.metadata,
       userAgent: options.userAgent,
+      authenticator: options.authenticator,
       grpcName,
       grpcPath,
     })

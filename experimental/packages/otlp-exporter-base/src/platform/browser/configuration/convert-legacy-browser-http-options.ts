@@ -28,6 +28,7 @@ export function convertLegacyBrowserHttpOptions(
       timeoutMillis: config.timeoutMillis,
       headers: convertLegacyHeaders(config),
       concurrencyLimit: config.concurrencyLimit,
+      authenticator: config.authenticator,
     },
     {}, // no fallback for browser case
     getHttpConfigurationDefaults(requiredHeaders, signalResourcePath)

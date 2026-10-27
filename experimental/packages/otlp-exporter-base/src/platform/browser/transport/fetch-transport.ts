@@ -12,6 +12,8 @@ import {
   parseRetryAfterToMills,
 } from '../../../is-export-retryable';
 import type { HeadersFactory } from '../../../configuration/otlp-http-configuration';
+import type { Authenticator } from '../../../authenticator';
+import { resolveAuthenticatorHeaders } from '../../../authenticator';
 
 /**
  * Maximum total body size for concurrent keepalive requests.
@@ -47,6 +49,7 @@ let pendingKeepaliveCount = 0;
 export interface FetchTransportParameters {
   url: string;
   headers: HeadersFactory;
+  authenticator?: Authenticator;
 }
 
 class FetchTransport implements IExporterTransport {
@@ -113,7 +116,24 @@ class FetchTransport implements IExporterTransport {
     try {
       const url = new URL(this._parameters.url);
       // Resolve headers before entering the suppressed fetch context.
-      const headers = await this._parameters.headers();
+      let headers = { ...(await this._parameters.headers()) };
+      if (this._parameters.authenticator != null) {
+        try {
+          headers = await resolveAuthenticatorHeaders(
+            this._parameters.authenticator,
+            headers
+          );
+        } catch (authError) {
+          diag.error(`export authentication failure (error: ${authError})`);
+          return {
+            status: 'failure',
+            error:
+              authError instanceof Error
+                ? authError
+                : new Error(String(authError)),
+          };
+        }
+      }
       const response = await context.with(suppressedContext, () =>
         fetchApi(url.href, {
           method: 'POST',
@@ -183,8 +203,8 @@ class FetchTransport implements IExporterTransport {
     }
   }
 
-  shutdown() {
-    // Intentionally left empty, nothing to do.
+  shutdown(): void | Promise<void> {
+    return this._parameters.authenticator?.shutdown?.();
   }
 }
 

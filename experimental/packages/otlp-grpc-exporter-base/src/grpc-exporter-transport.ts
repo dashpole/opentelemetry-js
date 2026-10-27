@@ -13,9 +13,11 @@ import type {
   ServiceClientConstructor,
 } from '@grpc/grpc-js';
 import type {
+  Authenticator,
   ExportResponse,
   IExporterTransport,
 } from '@opentelemetry/otlp-exporter-base';
+import { resolveAuthenticatorHeaders } from '@opentelemetry/otlp-exporter-base';
 import { VERSION } from './version';
 
 const DEFAULT_USER_AGENT = `OTel-OTLP-Exporter-JavaScript/${VERSION}`;
@@ -95,6 +97,7 @@ export interface GrpcExporterTransportParameters {
   metadata: () => Metadata;
   compression: 'gzip' | 'none';
   userAgent?: string;
+  authenticator?: Authenticator;
 }
 
 export class GrpcExporterTransport implements IExporterTransport {
@@ -108,13 +111,15 @@ export class GrpcExporterTransport implements IExporterTransport {
     this._deadlineExceededCount = 0;
   }
 
-  shutdown() {
+  shutdown(): void | Promise<void> {
     this._client?.close();
+    return this._parameters.authenticator?.shutdown?.();
   }
 
-  send(data: Uint8Array, timeoutMillis: number): Promise<ExportResponse> {
-    // We need to make a for gRPC
+  async send(data: Uint8Array, timeoutMillis: number): Promise<ExportResponse> {
+    // We need to make a Buffer for gRPC
     const buffer = Buffer.from(data);
+    const deadline = Date.now() + timeoutMillis;
 
     if (this._client == null) {
       // Lazy require to ensure that grpc is not loaded before instrumentations can wrap it
@@ -126,10 +131,10 @@ export class GrpcExporterTransport implements IExporterTransport {
       try {
         this._metadata = this._parameters.metadata();
       } catch (error) {
-        return Promise.resolve({
+        return {
           status: 'failure',
-          error: error,
-        });
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
       }
 
       const clientConstructor: ServiceClientConstructor =
@@ -153,29 +158,44 @@ export class GrpcExporterTransport implements IExporterTransport {
         );
         this._deadlineExceededCount = 0;
       } catch (error) {
-        return Promise.resolve({
+        return {
           status: 'failure',
-          error: error,
-        });
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+    }
+
+    if (this._metadata == null) {
+      return {
+        error: new Error('metadata was null'),
+        status: 'failure',
+      };
+    }
+
+    let requestMetadata = this._metadata;
+    if (this._parameters.authenticator != null) {
+      try {
+        const authHeaders = await resolveAuthenticatorHeaders(
+          this._parameters.authenticator
+        );
+        requestMetadata = this._metadata.clone();
+        for (const [key, value] of Object.entries(authHeaders)) {
+          requestMetadata.set(key.toLowerCase(), value);
+        }
+      } catch (error) {
+        return {
+          status: 'failure',
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
       }
     }
 
     return new Promise<ExportResponse>(resolve => {
-      const deadline = Date.now() + timeoutMillis;
-
-      // this should never happen
-      if (this._metadata == null) {
-        return resolve({
-          error: new Error('metadata was null'),
-          status: 'failure',
-        });
-      }
-
       // eslint-disable-next-line @typescript-eslint/ban-ts-comment
       // @ts-ignore The gRPC client constructor is created on runtime, so we don't have any types for the resulting client.
       this._client.export(
         buffer,
-        this._metadata,
+        requestMetadata,
         { deadline: deadline },
         (err: ServiceError, response: Buffer) => {
           if (err) {

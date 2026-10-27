@@ -5,9 +5,12 @@
 
 import * as assert from 'assert';
 import * as http from 'http';
+import { syncBuiltinESMExports } from 'module';
+import type { AddressInfo } from 'net';
 import * as sinon from 'sinon';
 
 import { OTLPLogExporter } from '../../src/platform/node';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 import {
   LoggerProvider,
   SimpleLogRecordProcessor,
@@ -27,6 +30,7 @@ describe('OTLPLogExporter', () => {
   describe('export', () => {
     afterEach(() => {
       sinon.restore();
+      syncBuiltinESMExports();
     });
 
     it('successfully exports data', done => {
@@ -77,6 +81,80 @@ describe('OTLPLogExporter', () => {
 
       loggerProvider.getLogger('test-logger').emit({ body: 'test-body' });
       loggerProvider.shutdown();
+    });
+
+    it('exports logs using OAuth2Authenticator against local OAuth2 and OTLP Protobuf servers', async () => {
+      const oauthServer = http.createServer((_req, res) => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(
+          JSON.stringify({
+            access_token: 'logs-proto-token',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          })
+        );
+      });
+      await new Promise<void>(resolve =>
+        oauthServer.listen(0, '127.0.0.1', resolve)
+      );
+      const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+      let receivedAuthHeader: string | undefined;
+      let receivedBytes = 0;
+      const collectorServer = http.createServer((req, res) => {
+        receivedAuthHeader = req.headers['authorization'];
+        const chunks: Buffer[] = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          receivedBytes = Buffer.concat(chunks).length;
+          if (receivedAuthHeader !== 'Bearer logs-proto-token') {
+            res.writeHead(401, { Connection: 'close' });
+            res.end();
+            return;
+          }
+          res.writeHead(200, { Connection: 'close' });
+          res.end();
+        });
+      });
+      await new Promise<void>(resolve =>
+        collectorServer.listen(0, '127.0.0.1', resolve)
+      );
+      const collectorPort = (collectorServer.address() as AddressInfo).port;
+
+      try {
+        const authenticator = new OAuth2Authenticator({
+          tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+          clientId: 'logs-proto-client',
+          clientSecret: 'logs-proto-secret',
+        });
+
+        const loggerProvider = new LoggerProvider({
+          processors: [
+            new SimpleLogRecordProcessor({
+              exporter: new OTLPLogExporter({
+                url: `http://127.0.0.1:${collectorPort}/v1/logs`,
+                authenticator,
+              }),
+            }),
+          ],
+        });
+
+        loggerProvider.getLogger('test-logger').emit({ body: 'auth-log-body' });
+        await loggerProvider.shutdown();
+
+        assert.strictEqual(receivedAuthHeader, 'Bearer logs-proto-token');
+        assert.ok(receivedBytes > 0);
+      } finally {
+        oauthServer.closeAllConnections();
+        collectorServer.closeAllConnections();
+        await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+        await new Promise<void>(resolve =>
+          collectorServer.close(() => resolve())
+        );
+      }
     });
   });
 });

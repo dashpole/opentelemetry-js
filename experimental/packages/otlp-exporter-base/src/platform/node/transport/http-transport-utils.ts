@@ -46,16 +46,17 @@ export function sendWithHttp(
 ): Promise<ExportResponse> {
   return new Promise<ExportResponse>(resolve => {
     const parsedUrl = new URL(url);
+    const requestHeaders: Record<string, string> = { ...headers };
 
     if (userAgent) {
-      headers['User-Agent'] = `${userAgent} ${DEFAULT_USER_AGENT}`;
+      requestHeaders['User-Agent'] = `${userAgent} ${DEFAULT_USER_AGENT}`;
     } else {
-      headers['User-Agent'] = DEFAULT_USER_AGENT;
+      requestHeaders['User-Agent'] = DEFAULT_USER_AGENT;
     }
 
     const options: http.RequestOptions | https.RequestOptions = {
       method: 'POST',
-      headers,
+      headers: requestHeaders,
       agent,
     };
 

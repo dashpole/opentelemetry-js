@@ -5,11 +5,14 @@
 
 import * as assert from 'assert';
 import * as http from 'http';
+import { syncBuiltinESMExports } from 'module';
+import type { AddressInfo } from 'net';
 import * as sinon from 'sinon';
 import { Stream } from 'stream';
 
 import { MeterProvider } from '@opentelemetry/sdk-metrics';
 import { TracerProvider, SimpleSpanProcessor } from '@opentelemetry/sdk-trace';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 import { OTLPTraceExporter } from '../../src/platform/node';
 import { TestMetricReader } from '../utils';
 
@@ -24,6 +27,7 @@ describe('OTLPTraceExporter', () => {
   describe('export', () => {
     afterEach(() => {
       sinon.restore();
+      syncBuiltinESMExports();
     });
 
     it('successfully exports data', done => {
@@ -73,6 +77,80 @@ describe('OTLPTraceExporter', () => {
       });
 
       tracerProvider.getTracer('test-tracer').startSpan('test-span').end();
+    });
+
+    it('exports spans using OAuth2Authenticator against local OAuth2 and OTLP Protobuf servers', async () => {
+      const oauthServer = http.createServer((_req, res) => {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          Connection: 'close',
+        });
+        res.end(
+          JSON.stringify({
+            access_token: 'trace-proto-token',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          })
+        );
+      });
+      await new Promise<void>(resolve =>
+        oauthServer.listen(0, '127.0.0.1', resolve)
+      );
+      const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+      let receivedAuthHeader: string | undefined;
+      let receivedBytes = 0;
+      const collectorServer = http.createServer((req, res) => {
+        receivedAuthHeader = req.headers['authorization'];
+        const chunks: Buffer[] = [];
+        req.on('data', c => chunks.push(c));
+        req.on('end', () => {
+          receivedBytes = Buffer.concat(chunks).length;
+          if (receivedAuthHeader !== 'Bearer trace-proto-token') {
+            res.writeHead(401, { Connection: 'close' });
+            res.end();
+            return;
+          }
+          res.writeHead(200, { Connection: 'close' });
+          res.end();
+        });
+      });
+      await new Promise<void>(resolve =>
+        collectorServer.listen(0, '127.0.0.1', resolve)
+      );
+      const collectorPort = (collectorServer.address() as AddressInfo).port;
+
+      try {
+        const authenticator = new OAuth2Authenticator({
+          tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+          clientId: 'trace-proto-client',
+          clientSecret: 'trace-proto-secret',
+        });
+
+        const tracerProvider = new TracerProvider({
+          spanProcessors: [
+            new SimpleSpanProcessor({
+              exporter: new OTLPTraceExporter({
+                url: `http://127.0.0.1:${collectorPort}/v1/traces`,
+                authenticator,
+              }),
+            }),
+          ],
+        });
+
+        tracerProvider.getTracer('test-tracer').startSpan('auth-span').end();
+        await tracerProvider.shutdown();
+
+        assert.strictEqual(receivedAuthHeader, 'Bearer trace-proto-token');
+        assert.ok(receivedBytes > 0);
+      } finally {
+        oauthServer.closeAllConnections();
+        collectorServer.closeAllConnections();
+        await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+        await new Promise<void>(resolve =>
+          collectorServer.close(() => resolve())
+        );
+      }
     });
   });
 });

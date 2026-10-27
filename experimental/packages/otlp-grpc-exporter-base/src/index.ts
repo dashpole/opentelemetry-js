@@ -14,3 +14,8 @@ export {
   createSslCredentials,
 } from './grpc-exporter-transport';
 export type { OTLPGRPCExporterConfigNode } from './types';
+export { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
+export type {
+  Authenticator,
+  OAuth2AuthenticatorOptions,
+} from '@opentelemetry/otlp-exporter-base';

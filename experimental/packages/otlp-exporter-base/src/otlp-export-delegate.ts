@@ -154,7 +154,7 @@ class OTLPExportDelegate<Internal, Response>
   async shutdown(): Promise<void> {
     this._diagLogger.debug('shutdown started');
     await this.forceFlush();
-    this._transport.shutdown();
+    await (this._transport.shutdown() as void | Promise<void>);
   }
 }
 

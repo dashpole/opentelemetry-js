@@ -14,6 +14,8 @@ import { VERSION } from '../src/version';
 import * as assert from 'assert';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import * as sinon from 'sinon';
 import type { Metadata, ServiceError } from '@grpc/grpc-js';
 import {
@@ -24,9 +26,11 @@ import {
 } from '@grpc/grpc-js';
 import { types } from 'util';
 import type {
+  Authenticator,
   ExportResponseFailure,
   ExportResponseSuccess,
 } from '@opentelemetry/otlp-exporter-base';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 import type { ISerializer } from '@opentelemetry/otlp-transformer';
 import type { Histogram } from '@opentelemetry/sdk-metrics';
 import { MeterProvider, MetricReader } from '@opentelemetry/sdk-metrics';
@@ -589,6 +593,143 @@ describe('GrpcExporterTransport', function () {
           'rpc.response.status_code': 'DATA_LOSS',
           'error.type': 'Error',
         });
+      });
+
+      it('fetches OAuth2 Bearer token from local server and sets gRPC metadata without mutating static metadata', async function () {
+        let tokenRequests = 0;
+        const oauthServer = http.createServer((_req, res) => {
+          tokenRequests++;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              access_token: `grpc-oauth-token-${tokenRequests}`,
+              token_type: 'Bearer',
+              expires_in: 3600,
+            })
+          );
+        });
+        await new Promise<void>(resolve =>
+          oauthServer.listen(0, '127.0.0.1', resolve)
+        );
+        const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+        try {
+          const staticMetadata = createEmptyMetadata();
+          staticMetadata.set('authorization', 'Bearer static-token');
+          staticMetadata.set('foo', 'bar');
+
+          const authenticator = new OAuth2Authenticator({
+            tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+            clientId: 'grpc-client',
+            clientSecret: 'grpc-secret',
+          });
+
+          const transport = createOtlpGrpcExporterTransport({
+            ...simpleClientConfig,
+            metadata: () => staticMetadata,
+            authenticator,
+          });
+
+          const res1 = await transport.send(
+            Buffer.from([1, 2, 3]),
+            timeoutMillis
+          );
+          const res2 = await transport.send(
+            Buffer.from([4, 5, 6]),
+            timeoutMillis
+          );
+
+          assert.strictEqual(res1.status, 'success');
+          assert.strictEqual(res2.status, 'success');
+          assert.strictEqual(tokenRequests, 1);
+          assert.strictEqual(serverTestContext.requests.length, 2);
+          assert.deepStrictEqual(
+            serverTestContext.requests[0].metadata.get('authorization'),
+            ['Bearer grpc-oauth-token-1']
+          );
+          assert.deepStrictEqual(
+            serverTestContext.requests[0].metadata.get('foo'),
+            ['bar']
+          );
+          // Static metadata must remain unmutated
+          assert.deepStrictEqual(staticMetadata.get('authorization'), [
+            'Bearer static-token',
+          ]);
+
+          await transport.shutdown();
+        } finally {
+          oauthServer.closeAllConnections();
+          await new Promise<void>(resolve =>
+            oauthServer.close(() => resolve())
+          );
+        }
+      });
+
+      it('resolves dynamic authenticator headers per RPC call and forwards shutdown', async function () {
+        let callNum = 0;
+        const shutdownSpy = sinon.stub();
+        const authenticator: Authenticator = {
+          getHeaders: async () => {
+            callNum++;
+            return {
+              Authorization: `Bearer dynamic-rpc-${callNum}`,
+              'X-Custom-Mixed-Header': `val-${callNum}`,
+            };
+          },
+          shutdown: shutdownSpy,
+        };
+
+        const transport = createOtlpGrpcExporterTransport({
+          ...simpleClientConfig,
+          authenticator,
+        });
+
+        await transport.send(Buffer.from([1]), timeoutMillis);
+        await transport.send(Buffer.from([2]), timeoutMillis);
+
+        assert.strictEqual(serverTestContext.requests.length, 2);
+        assert.deepStrictEqual(
+          serverTestContext.requests[0].metadata.get('authorization'),
+          ['Bearer dynamic-rpc-1']
+        );
+        assert.deepStrictEqual(
+          serverTestContext.requests[0].metadata.get('x-custom-mixed-header'),
+          ['val-1']
+        );
+        assert.deepStrictEqual(
+          serverTestContext.requests[1].metadata.get('authorization'),
+          ['Bearer dynamic-rpc-2']
+        );
+        assert.deepStrictEqual(
+          serverTestContext.requests[1].metadata.get('x-custom-mixed-header'),
+          ['val-2']
+        );
+
+        await transport.shutdown();
+        sinon.assert.calledOnce(shutdownSpy);
+      });
+
+      it('returns failure when authenticator.getHeaders rejects', async function () {
+        const expectedError = new Error('grpc auth failure');
+        const authenticator: Authenticator = {
+          getHeaders: async () => {
+            throw expectedError;
+          },
+        };
+
+        const transport = createOtlpGrpcExporterTransport({
+          ...simpleClientConfig,
+          authenticator,
+        });
+
+        const result = (await transport.send(
+          Buffer.from([1, 2, 3]),
+          timeoutMillis
+        )) as ExportResponseFailure;
+
+        assert.strictEqual(result.status, 'failure');
+        assert.strictEqual(result.error, expectedError);
+        assert.strictEqual(serverTestContext.requests.length, 0);
       });
     });
     describe('uds', function () {

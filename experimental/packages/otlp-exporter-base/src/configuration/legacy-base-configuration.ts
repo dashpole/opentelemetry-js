@@ -4,6 +4,7 @@
  */
 import type { MeterProvider } from '@opentelemetry/api';
 import type { HeadersFactory } from './otlp-http-configuration';
+import type { Authenticator } from '../authenticator';
 
 export interface OTLPExporterConfigBase {
   /**
@@ -27,6 +28,23 @@ export interface OTLPExporterConfigBase {
    * };
    */
   headers?: Record<string, string> | HeadersFactory;
+  /**
+   * Authenticator responsible for dynamically acquiring, caching, refreshing,
+   * and attaching client credentials to each outgoing export request.
+   *
+   * @remarks
+   * Headers returned by `authenticator` are resolved per outgoing export request
+   * (including retries) and take case-insensitive precedence over colliding
+   * static `headers` without mutating the configured static `headers`.
+   *
+   * Implementations of {@link Authenticator} must adhere to:
+   * 1. **Concurrency safety**: Safe for concurrent invocation across overlapping exports.
+   * 2. **Non-blocking execution**: Authentication operations must not block indefinitely.
+   * 3. **Credential redaction**: Never log sensitive credentials or dynamic header values.
+   *
+   * @experimental This feature is in development as per the OpenTelemetry specification and is subject to breaking changes in minor releases.
+   */
+  authenticator?: Authenticator;
   /**
    * Collector endpoint URL for the exporter.
    *

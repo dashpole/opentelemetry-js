@@ -7,10 +7,13 @@ import { OTLPMetricExporter } from '../src';
 import type { ServerTestContext } from './utils';
 import { startServer, TestMetricReader } from './utils';
 import * as assert from 'assert';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import {
   MeterProvider,
   PeriodicExportingMetricReader,
 } from '@opentelemetry/sdk-metrics';
+import { OAuth2Authenticator } from '@opentelemetry/otlp-exporter-base';
 
 const testServiceDefinition = {
   export: {
@@ -93,5 +96,58 @@ describe('OTLPMetricsExporter', function () {
     );
     assert.ok(scopeMetrics);
     await meterProvider.shutdown();
+  });
+
+  it('exports metrics using OAuth2Authenticator with gRPC metadata', async () => {
+    const oauthServer = http.createServer((_req, res) => {
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        Connection: 'close',
+      });
+      res.end(
+        JSON.stringify({
+          access_token: 'metrics-grpc-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        })
+      );
+    });
+    await new Promise<void>(resolve =>
+      oauthServer.listen(0, '127.0.0.1', resolve)
+    );
+    const oauthPort = (oauthServer.address() as AddressInfo).port;
+
+    try {
+      const authenticator = new OAuth2Authenticator({
+        tokenUrl: `http://127.0.0.1:${oauthPort}/oauth/token`,
+        clientId: 'metrics-grpc-client',
+        clientSecret: 'metrics-grpc-secret',
+      });
+
+      const exporter = new OTLPMetricExporter({
+        url: 'http://localhost:1502',
+        authenticator,
+      });
+      const meterProvider = new MeterProvider({
+        readers: [
+          new PeriodicExportingMetricReader({
+            exporter,
+          }),
+        ],
+      });
+
+      meterProvider.getMeter('test-meter').createCounter('auth-counter').add(1);
+      await meterProvider.forceFlush();
+
+      assert.strictEqual(serverTestContext.requests.length, 1);
+      assert.deepStrictEqual(
+        serverTestContext.requests[0].metadata.get('authorization'),
+        ['Bearer metrics-grpc-token']
+      );
+      await meterProvider.shutdown();
+    } finally {
+      oauthServer.closeAllConnections();
+      await new Promise<void>(resolve => oauthServer.close(() => resolve()));
+    }
   });
 });

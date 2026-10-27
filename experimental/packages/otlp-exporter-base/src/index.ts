@@ -27,3 +27,12 @@ export type { IOtlpExportDelegate } from './otlp-export-delegate';
 export { createOtlpNetworkExportDelegate } from './otlp-network-export-delegate';
 
 export { ExporterMetrics } from './ExporterMetrics';
+
+export {
+  mergeHeadersCaseInsensitive,
+  resolveAuthenticatorHeaders,
+} from './authenticator';
+export type { Authenticator } from './authenticator';
+
+export { OAuth2Authenticator } from './oauth2-authenticator';
+export type { OAuth2AuthenticatorOptions } from './oauth2-authenticator';

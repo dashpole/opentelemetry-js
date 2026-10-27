@@ -4,6 +4,7 @@
  */
 
 import type { HeadersFactory } from './otlp-http-configuration';
+import type { Authenticator } from '../authenticator';
 
 /**
  * Configuration shared across all OTLP exporters
@@ -17,6 +18,10 @@ export interface OtlpSharedConfiguration {
   timeoutMillis: number;
   concurrencyLimit: number;
   compression: 'gzip' | 'none';
+  /**
+   * @experimental This feature is in development as per the OpenTelemetry specification and is subject to breaking changes in minor releases.
+   */
+  authenticator?: Authenticator;
 }
 
 export function validateTimeoutMillis(timeoutMillis: number) {
@@ -48,6 +53,11 @@ export function mergeOtlpSharedConfigurationWithDefaults(
   fallbackConfiguration: Partial<OtlpSharedConfiguration>,
   defaultConfiguration: OtlpSharedConfiguration
 ): OtlpSharedConfiguration {
+  const authenticator =
+    userProvidedConfiguration.authenticator ??
+    fallbackConfiguration.authenticator ??
+    defaultConfiguration.authenticator;
+
   return {
     timeoutMillis: validateTimeoutMillis(
       userProvidedConfiguration.timeoutMillis ??
@@ -62,6 +72,7 @@ export function mergeOtlpSharedConfigurationWithDefaults(
       userProvidedConfiguration.compression ??
       fallbackConfiguration.compression ??
       defaultConfiguration.compression,
+    ...(authenticator !== undefined ? { authenticator } : {}),
   };
 }
 

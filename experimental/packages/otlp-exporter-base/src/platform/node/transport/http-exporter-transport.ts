@@ -11,6 +11,7 @@ import type { ExportResponse } from '../../../export-response';
 import type { IExporterTransport } from '../../../exporter-transport';
 import { sendWithHttp } from './http-transport-utils';
 import type { NodeHttpRequestParameters } from './node-http-transport-types';
+import { resolveAuthenticatorHeaders } from '../../../authenticator';
 
 interface Utils {
   agent: http.Agent | https.Agent;
@@ -27,7 +28,18 @@ class HttpExporterTransport implements IExporterTransport {
 
   async send(data: Uint8Array, timeoutMillis: number): Promise<ExportResponse> {
     const { agent, request } = await this._loadUtils();
-    const headers = await this._parameters.headers();
+    let headers: Record<string, string>;
+    try {
+      headers = await resolveAuthenticatorHeaders(
+        this._parameters.authenticator,
+        await this._parameters.headers()
+      );
+    } catch (error) {
+      return {
+        status: 'failure',
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
+    }
 
     return sendWithHttp(
       request,
@@ -41,8 +53,8 @@ class HttpExporterTransport implements IExporterTransport {
     );
   }
 
-  shutdown() {
-    // intentionally left empty, nothing to do.
+  shutdown(): void | Promise<void> {
+    return this._parameters.authenticator?.shutdown?.();
   }
 
   private async _loadUtils(): Promise<Utils> {
