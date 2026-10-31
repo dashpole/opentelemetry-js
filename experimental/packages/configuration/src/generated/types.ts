@@ -238,6 +238,16 @@ export type ConsoleExporter = {} | null;
 export type ExperimentalEventToSpanEventBridgeLogRecordProcessor = {} | null;
 
 /**
+ * Configure the minimum stability level of telemetry emitted by the provider.
+ * Log records with a stability level lower than .minimum_stability are dropped.
+ * Values include:
+ * * development: Experimental telemetry that may change or be removed in minor versions.
+ * * stable: Telemetry covered by backward-compatibility guarantees.
+ * If omitted, stable is used.
+ */
+export type Stability = ('development' | 'stable') | null;
+
+/**
  * Configure exporter to be OTLP with HTTP transport.
  * If omitted, ignore.
  */
@@ -773,6 +783,7 @@ export interface LoggerProvider {
   processors: LogRecordProcessor[];
   limits?: LogRecordLimits;
   'logger_configurator/development'?: ExperimentalLoggerConfigurator;
+  minimum_stability?: Stability;
 }
 
 export interface LogRecordProcessor {
@@ -932,6 +943,7 @@ export interface MeterProvider {
   views?: View[];
   exemplar_filter?: ExemplarFilter;
   'meter_configurator/development'?: ExperimentalMeterConfigurator;
+  minimum_stability?: Stability;
 }
 
 export interface MetricReader {
@@ -1150,6 +1162,13 @@ export interface ViewStream {
    */
   aggregation_cardinality_limit?: number | null;
   attribute_keys?: IncludeExclude;
+  /**
+   * Configure whether the resulting stream(s) are enabled.
+   * If true, the stream is enabled regardless of the instrument's OptIn or Stability advisory parameters.
+   * If false, the drop aggregation is used regardless of .aggregation.
+   * If omitted or null, the instrument's OptIn and Stability advisory parameters and the meter provider's .minimum_stability determine whether the stream is enabled.
+   */
+  enabled?: boolean | null;
 }
 
 /**
@@ -1250,6 +1269,7 @@ export interface TracerProvider {
   sampler?: Sampler;
   id_generator?: IdGenerator;
   'tracer_configurator/development'?: ExperimentalTracerConfigurator;
+  minimum_stability?: Stability;
 }
 
 export interface SpanProcessor {

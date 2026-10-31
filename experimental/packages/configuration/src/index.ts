@@ -56,6 +56,7 @@ export type {
   TraceIdRatioBasedSampler as TraceIdRatioBasedSamplerConfigModel,
   ParentBasedSampler as ParentBasedSamplerConfigModel,
   Resource as ResourceConfigModel,
+  Stability as StabilityConfigModel,
 } from './generated/types';
 export { parseConfigFile } from './parse';
 export {

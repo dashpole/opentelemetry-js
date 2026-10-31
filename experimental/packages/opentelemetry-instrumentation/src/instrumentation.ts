@@ -5,16 +5,24 @@
 
 import type {
   DiagLogger,
-  Meter,
   MeterProvider,
-  Tracer,
   TracerProvider,
   Span,
 } from '@opentelemetry/api';
 import { diag, metrics, trace } from '@opentelemetry/api';
-import type { Logger, LoggerProvider } from '@opentelemetry/api';
+import type { LoggerProvider } from '@opentelemetry/api';
 import { logs } from '@opentelemetry/api';
 import * as shimmer from './shimmer';
+import type {
+  StabilityLogger,
+  StabilityMeter,
+  StabilityTracer,
+} from './stability';
+import {
+  wrapLoggerWithStability,
+  wrapMeterWithStability,
+  wrapTracerWithStability,
+} from './stability';
 import type {
   InstrumentationModuleDefinition,
   Instrumentation,
@@ -31,9 +39,9 @@ export abstract class InstrumentationAbstract<
 {
   protected _config: ConfigType = {} as ConfigType;
 
-  private _tracer: Tracer;
-  private _meter: Meter;
-  private _logger: Logger;
+  private _tracer: StabilityTracer;
+  private _meter: StabilityMeter;
+  private _logger: StabilityLogger;
   protected _diag: DiagLogger;
   public readonly instrumentationName: string;
   public readonly instrumentationVersion: string;
@@ -52,9 +60,15 @@ export abstract class InstrumentationAbstract<
       namespace: instrumentationName,
     });
 
-    this._tracer = trace.getTracer(instrumentationName, instrumentationVersion);
-    this._meter = metrics.getMeter(instrumentationName, instrumentationVersion);
-    this._logger = logs.getLogger(instrumentationName, instrumentationVersion);
+    this._tracer = wrapTracerWithStability(
+      trace.getTracer(instrumentationName, instrumentationVersion)
+    );
+    this._meter = wrapMeterWithStability(
+      metrics.getMeter(instrumentationName, instrumentationVersion)
+    );
+    this._logger = wrapLoggerWithStability(
+      logs.getLogger(instrumentationName, instrumentationVersion)
+    );
     this._updateMetricInstruments();
   }
 
@@ -68,7 +82,7 @@ export abstract class InstrumentationAbstract<
   protected _massUnwrap = shimmer.massUnwrap;
 
   /* Returns meter */
-  protected get meter(): Meter {
+  protected get meter(): StabilityMeter {
     return this._meter;
   }
 
@@ -77,16 +91,18 @@ export abstract class InstrumentationAbstract<
    * @param meterProvider
    */
   public setMeterProvider(meterProvider: MeterProvider): void {
-    this._meter = meterProvider.getMeter(
-      this.instrumentationName,
-      this.instrumentationVersion
+    this._meter = wrapMeterWithStability(
+      meterProvider.getMeter(
+        this.instrumentationName,
+        this.instrumentationVersion
+      )
     );
 
     this._updateMetricInstruments();
   }
 
   /* Returns logger */
-  protected get logger(): Logger {
+  protected get logger(): StabilityLogger {
     return this._logger;
   }
 
@@ -95,9 +111,11 @@ export abstract class InstrumentationAbstract<
    * @param loggerProvider
    */
   public setLoggerProvider(loggerProvider: LoggerProvider): void {
-    this._logger = loggerProvider.getLogger(
-      this.instrumentationName,
-      this.instrumentationVersion
+    this._logger = wrapLoggerWithStability(
+      loggerProvider.getLogger(
+        this.instrumentationName,
+        this.instrumentationVersion
+      )
     );
   }
 
@@ -148,14 +166,16 @@ export abstract class InstrumentationAbstract<
    * @param tracerProvider
    */
   public setTracerProvider(tracerProvider: TracerProvider): void {
-    this._tracer = tracerProvider.getTracer(
-      this.instrumentationName,
-      this.instrumentationVersion
+    this._tracer = wrapTracerWithStability(
+      tracerProvider.getTracer(
+        this.instrumentationName,
+        this.instrumentationVersion
+      )
     );
   }
 
   /* Returns tracer */
-  protected get tracer(): Tracer {
+  protected get tracer(): StabilityTracer {
     return this._tracer;
   }
 

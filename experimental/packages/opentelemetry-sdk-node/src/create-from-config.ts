@@ -34,8 +34,8 @@ import {
   RandomIdGenerator,
   SimpleSpanProcessor,
   TraceIdRatioBasedSampler,
-  TracerProvider,
 } from '@opentelemetry/sdk-trace';
+import type { TracerProvider } from '@opentelemetry/sdk-trace';
 import type {
   Resource,
   DetectedResourceAttributes,
@@ -119,12 +119,12 @@ import type {
   LogRecordExporter,
   LogRecordProcessor,
   LogRecordLimits,
+  LoggerProvider,
 } from '@opentelemetry/sdk-logs';
 import {
   BatchLogRecordProcessor,
   ConsoleLogRecordExporter,
   SimpleLogRecordProcessor,
-  LoggerProvider,
 } from '@opentelemetry/sdk-logs';
 import { B3InjectEncoding, B3Propagator } from '@opentelemetry/propagator-b3';
 import {
@@ -136,10 +136,10 @@ import type {
   AggregationOption,
   AggregationSelector,
   IAttributesProcessor,
+  MeterProvider,
   MetricProducer,
   MetricReader,
   PushMetricExporter,
-  ViewOptions,
 } from '@opentelemetry/sdk-metrics';
 import {
   AggregationType,
@@ -147,10 +147,16 @@ import {
   createAllowListAttributesProcessor,
   createDenyListAttributesProcessor,
   InstrumentType,
-  MeterProvider,
   PeriodicExportingMetricReader,
 } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import type { StabilityViewOptions } from './stability';
+import {
+  StabilityLoggerProvider,
+  StabilityMeterProvider,
+  StabilityTracerProvider,
+  stabilityFromString,
+} from './stability';
 
 // ---- internal utilities
 
@@ -664,12 +670,20 @@ export function createLoggerProviderFromConfig(
     logger_provider.limits,
     attribute_limits
   );
-  checkConfigUse('LoggerProvider', logger_provider, ['processors', 'limits']);
+  const minimumStability = stabilityFromString(
+    logger_provider.minimum_stability
+  );
+  checkConfigUse('LoggerProvider', logger_provider, [
+    'processors',
+    'limits',
+    'minimum_stability',
+  ]);
 
-  return new LoggerProvider({
+  return new StabilityLoggerProvider({
     resource,
     processors,
     logRecordLimits,
+    minimumStability,
     // TODO: loggerConfigurator
     // TODO: meterProvider
     // Note: forceFlushTimeoutMillis not configurable via decl conf.
@@ -1094,8 +1108,10 @@ function createAggregationOptionFromConfig(
   }
 }
 
-function createViewOptionsFromConfig(view: ViewConfigModel): ViewOptions {
-  const viewOptions: ViewOptions = {};
+function createViewOptionsFromConfig(
+  view: ViewConfigModel
+): StabilityViewOptions {
+  const viewOptions: StabilityViewOptions = {};
   checkConfigUse('View', view, ['selector', 'stream']);
 
   checkConfigUse('ViewSelector', view.selector, [
@@ -1133,6 +1149,7 @@ function createViewOptionsFromConfig(view: ViewConfigModel): ViewOptions {
     'aggregation',
     'aggregation_cardinality_limit',
     'attribute_keys',
+    'enabled',
   ]);
   if (view.stream.name) {
     viewOptions.name = view.stream.name;
@@ -1147,6 +1164,9 @@ function createViewOptionsFromConfig(view: ViewConfigModel): ViewOptions {
   }
   viewOptions.aggregationCardinalityLimit =
     view.stream.aggregation_cardinality_limit ?? undefined;
+  if (view.stream.enabled != null) {
+    viewOptions.enabled = view.stream.enabled;
+  }
   if (view.stream.attribute_keys) {
     const processors: IAttributesProcessor[] = [];
     if (
@@ -1201,15 +1221,23 @@ export function createMeterProviderFromConfig(
 ): MeterProvider {
   const readers = meter_provider.readers.map(createMetricReaderFromConfig);
   const views = meter_provider.views?.map(createViewOptionsFromConfig);
+  const minimumStability = stabilityFromString(
+    meter_provider.minimum_stability
+  );
 
   // TODO(5147): exemplar_filter when sdk-metrics package supports it
   // TODO(6952): meter_configurator/development when sdk-metrics package supports it
-  checkConfigUse('MeterProvider', meter_provider, ['readers', 'views']);
+  checkConfigUse('MeterProvider', meter_provider, [
+    'readers',
+    'views',
+    'minimum_stability',
+  ]);
 
-  return new MeterProvider({
+  return new StabilityMeterProvider({
     resource,
     readers,
     views,
+    minimumStability,
     // Note: sdkMetricsEnabled not configurable via decl conf. Once SDK health metrics are stabilized, they will be on by default.
   });
 }
@@ -1420,21 +1448,26 @@ export function createTracerProviderFromConfig(
   );
   const sampler = createSamplerFromConfig(tracer_provider.sampler);
   const idGenerator = createIdGeneratorFromConfig(tracer_provider.id_generator);
+  const minimumStability = stabilityFromString(
+    tracer_provider.minimum_stability
+  );
 
   checkConfigUse('TracerProvider', tracer_provider, [
     'processors',
     'limits',
     'sampler',
     'id_generator',
+    'minimum_stability',
   ]);
 
   // TODO(6960): 'tracer_configurator/development', TracerProvider doesn't currently support this
   // TODO(6624): meterProvider, if SDK health metrics enabled
-  return new TracerProvider({
+  return new StabilityTracerProvider({
     resource,
     spanProcessors,
     spanLimits,
     sampler,
     idGenerator,
+    minimumStability,
   });
 }

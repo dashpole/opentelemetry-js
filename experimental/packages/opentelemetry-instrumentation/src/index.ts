@@ -21,3 +21,33 @@ export {
   safeExecuteInTheMiddleAsync,
 } from './utils';
 export { SemconvStability, semconvStabilityFromStr } from './semconvStability';
+export {
+  Stability,
+  STABILITY_WRAPPER_SYMBOL,
+  normalizeStability,
+  isStabilityEnabled,
+  stabilityFromString,
+  createSuppressedSpan,
+  extractTracerStability,
+  extractLoggerStability,
+  normalizeStabilityMetricOptions,
+  wrapTracerWithStability,
+  wrapLoggerWithStability,
+  wrapMeterWithStability,
+} from './stability';
+export type {
+  StabilitySpanOptions,
+  StabilityTracerEnabledOptions,
+  StabilityTracer,
+  StabilityMetricAdvice,
+  StabilityMetricOptions,
+  StabilitySyncInstrument,
+  StabilityCounter,
+  StabilityUpDownCounter,
+  StabilityGauge,
+  StabilityHistogram,
+  StabilityMeter,
+  StabilityLogRecord,
+  StabilityLoggerEnabledOptions,
+  StabilityLogger,
+} from './stability';
