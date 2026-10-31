@@ -28,8 +28,9 @@ import type {
   SpanExporter,
   SpanLimits,
   SpanProcessor,
+  TracerProvider,
 } from '@opentelemetry/sdk-trace';
-import { ConsoleSpanExporter, TracerProvider } from '@opentelemetry/sdk-trace';
+import { ConsoleSpanExporter } from '@opentelemetry/sdk-trace';
 import { OTLPTraceExporter as OTLPProtoTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { OTLPTraceExporter as OTLPHttpTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { OTLPTraceExporter as OTLPGrpcTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
@@ -45,17 +46,16 @@ import { B3InjectEncoding, B3Propagator } from '@opentelemetry/propagator-b3';
 import type {
   LogRecordProcessor,
   LogRecordLimits,
+  LoggerProvider,
 } from '@opentelemetry/sdk-logs';
 import {
   ConsoleLogRecordExporter,
-  LoggerProvider,
   SimpleLogRecordProcessor,
 } from '@opentelemetry/sdk-logs';
 import { OTLPLogExporter as OTLPHttpLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPLogExporter as OTLPGrpcLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
 import { OTLPLogExporter as OTLPProtoLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
-import type { IMetricReader } from '@opentelemetry/sdk-metrics';
-import { MeterProvider } from '@opentelemetry/sdk-metrics';
+import type { IMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
 import type { ResourceDetector, Resource } from '@opentelemetry/resources';
 import {
   defaultResource,
@@ -71,6 +71,11 @@ import {
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 
 import type { StartSdkFromEnvOptions } from './types';
+import {
+  StabilityLoggerProvider,
+  StabilityMeterProvider,
+  StabilityTracerProvider,
+} from './stability';
 // Note: circular import here that would be nice to break
 import {
   getBatchLogRecordProcessorFromEnv,
@@ -402,7 +407,11 @@ export function createTracerProviderFromOptsAndEnv(
   resource: Resource,
   opts?: Pick<
     StartSdkFromEnvOptions,
-    'spanProcessors' | 'sampler' | 'spanLimits'
+    | 'spanProcessors'
+    | 'sampler'
+    | 'spanLimits'
+    | 'minimumStability'
+    | 'tracerMinimumStability'
   >,
   meterProvider?: ApiMeterProvider
 ): TracerProvider | undefined {
@@ -416,7 +425,7 @@ export function createTracerProviderFromOptsAndEnv(
   if (spanProcessors.length === 0) {
     return undefined;
   } else {
-    return new TracerProvider({
+    return new StabilityTracerProvider({
       resource,
       spanProcessors,
       sampler: opts?.sampler ?? createSamplerFromEnv(),
@@ -425,6 +434,7 @@ export function createTracerProviderFromOptsAndEnv(
         ...opts?.spanLimits,
       },
       meterProvider,
+      minimumStability: opts?.tracerMinimumStability ?? opts?.minimumStability,
     });
   }
 }
@@ -507,7 +517,10 @@ export function createLoggerProviderFromOptsAndEnv(
   resource: Resource,
   opts?: Pick<
     StartSdkFromEnvOptions,
-    'logRecordProcessors' | 'logRecordLimits'
+    | 'logRecordProcessors'
+    | 'logRecordLimits'
+    | 'minimumStability'
+    | 'loggerMinimumStability'
   >,
   meterProvider?: ApiMeterProvider
 ): LoggerProvider | undefined {
@@ -521,7 +534,7 @@ export function createLoggerProviderFromOptsAndEnv(
   if (processors.length === 0) {
     return undefined;
   } else {
-    return new LoggerProvider({
+    return new StabilityLoggerProvider({
       resource,
       processors,
       logRecordLimits: {
@@ -529,13 +542,17 @@ export function createLoggerProviderFromOptsAndEnv(
         ...opts?.logRecordLimits,
       },
       meterProvider,
+      minimumStability: opts?.loggerMinimumStability ?? opts?.minimumStability,
     });
   }
 }
 
 export function createMeterProviderFromOptsAndEnv(
   resource: Resource,
-  opts?: Pick<StartSdkFromEnvOptions, 'metricReaders' | 'views'>,
+  opts?: Pick<
+    StartSdkFromEnvOptions,
+    'metricReaders' | 'views' | 'minimumStability' | 'meterMinimumStability'
+  >,
   sdkMetricsEnabled?: boolean
 ): MeterProvider | undefined {
   let readers: IMetricReader[];
@@ -548,11 +565,12 @@ export function createMeterProviderFromOptsAndEnv(
   if (readers.length === 0) {
     return undefined;
   } else {
-    return new MeterProvider({
+    return new StabilityMeterProvider({
       resource,
       views: opts?.views,
       readers,
       sdkMetricsEnabled,
+      minimumStability: opts?.meterMinimumStability ?? opts?.minimumStability,
     });
   }
 }

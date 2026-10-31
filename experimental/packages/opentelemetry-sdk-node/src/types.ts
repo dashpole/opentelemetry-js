@@ -11,7 +11,7 @@ import type {
   LogRecordLimits,
   LogRecordProcessor,
 } from '@opentelemetry/sdk-logs';
-import type { IMetricReader, ViewOptions } from '@opentelemetry/sdk-metrics';
+import type { IMetricReader } from '@opentelemetry/sdk-metrics';
 import type {
   Sampler,
   SpanExporter,
@@ -19,6 +19,7 @@ import type {
   SpanProcessor,
   IdGenerator,
 } from '@opentelemetry/sdk-trace';
+import type { Stability, StabilityViewOptions } from './stability';
 
 export interface NodeSDKConfiguration {
   autoDetectResources: boolean;
@@ -26,7 +27,7 @@ export interface NodeSDKConfiguration {
   textMapPropagator: TextMapPropagator | null;
   logRecordProcessors?: LogRecordProcessor[];
   metricReaders?: IMetricReader[];
-  views: ViewOptions[];
+  views: StabilityViewOptions[];
   instrumentations: (Instrumentation | Instrumentation[])[];
   /**
    * Custom resource to attach to telemetry.
@@ -44,6 +45,10 @@ export interface NodeSDKConfiguration {
   traceExporter: SpanExporter;
   spanLimits: SpanLimits;
   idGenerator: IdGenerator;
+  minimumStability?: Stability;
+  tracerMinimumStability?: Stability;
+  meterMinimumStability?: Stability;
+  loggerMinimumStability?: Stability;
 }
 
 /**
@@ -176,7 +181,7 @@ export interface StartSdkFromEnvOptions {
    * If not provided, then `OTEL_METRICS_EXPORTER` is used.
    */
   metricReaders?: IMetricReader[];
-  views?: ViewOptions[];
+  views?: StabilityViewOptions[];
 
   // Logs
   /**
@@ -193,6 +198,10 @@ export interface StartSdkFromEnvOptions {
   logRecordLimits?: LogRecordLimits;
 
   instrumentations?: (Instrumentation | Instrumentation[])[];
+  minimumStability?: Stability;
+  tracerMinimumStability?: Stability;
+  meterMinimumStability?: Stability;
+  loggerMinimumStability?: Stability;
 }
 
 export type StartSdkOptions =

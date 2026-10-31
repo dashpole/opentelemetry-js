@@ -30,21 +30,25 @@ import {
 import type {
   LogRecordProcessor,
   LogRecordExporter,
+  LoggerProvider,
 } from '@opentelemetry/sdk-logs';
 import {
-  LoggerProvider,
   ConsoleLogRecordExporter,
   SimpleLogRecordProcessor,
 } from '@opentelemetry/sdk-logs';
 import { OTLPLogExporter as OTLPHttpLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { OTLPLogExporter as OTLPGrpcLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
 import { OTLPLogExporter as OTLPProtoLogExporter } from '@opentelemetry/exporter-logs-otlp-proto';
-import type { IMetricReader, ViewOptions } from '@opentelemetry/sdk-metrics';
-import { MeterProvider } from '@opentelemetry/sdk-metrics';
-import type { SpanProcessor } from '@opentelemetry/sdk-trace';
-import { TracerProvider } from '@opentelemetry/sdk-trace';
+import type { IMetricReader, MeterProvider } from '@opentelemetry/sdk-metrics';
+import type { SpanProcessor, TracerProvider } from '@opentelemetry/sdk-trace';
 import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import type { NodeSDKConfiguration } from './types';
+import type { StabilityViewOptions } from './stability';
+import {
+  StabilityLoggerProvider,
+  StabilityMeterProvider,
+  StabilityTracerProvider,
+} from './stability';
 import {
   getBooleanFromEnv,
   getStringFromEnv,
@@ -73,9 +77,9 @@ export type MeterProviderConfig = {
    */
   readers?: IMetricReader[];
   /**
-   * List of {@link ViewOptions}s that should be passed to the MeterProvider
+   * List of {@link StabilityViewOptions}s that should be passed to the MeterProvider
    */
-  views?: ViewOptions[];
+  views?: StabilityViewOptions[];
 };
 
 export type LoggerProviderConfig = {
@@ -228,11 +232,14 @@ export class NodeSDK {
       // only register if there is a reader, otherwise we waste compute/memory.
       this._meterProviderConfig.readers.length > 0
     ) {
-      const meterProvider = new MeterProvider({
+      const meterProvider = new StabilityMeterProvider({
         resource: this._resource,
         views: this._meterProviderConfig?.views ?? [],
         readers: this._meterProviderConfig.readers,
         sdkMetricsEnabled,
+        minimumStability:
+          this._configuration?.meterMinimumStability ??
+          this._configuration?.minimumStability,
       });
 
       this._meterProvider = meterProvider;
@@ -265,7 +272,7 @@ export class NodeSDK {
 
     // Only register if there is a span processor
     if (spanProcessors.length > 0) {
-      this._tracerProvider = new TracerProvider({
+      this._tracerProvider = new StabilityTracerProvider({
         sampler: this._configuration?.sampler ?? createSamplerFromEnv(),
         spanLimits: {
           ...createSpanLimitsFromEnv(),
@@ -275,6 +282,9 @@ export class NodeSDK {
         meterProvider: sdkMetricsEnabled ? this._meterProvider : undefined,
         idGenerator: this._configuration?.idGenerator,
         spanProcessors,
+        minimumStability:
+          this._configuration?.tracerMinimumStability ??
+          this._configuration?.minimumStability,
       });
       trace.setGlobalTracerProvider(this._tracerProvider);
     }
@@ -286,11 +296,14 @@ export class NodeSDK {
     }
 
     if (this._loggerProviderConfig) {
-      const loggerProvider = new LoggerProvider({
+      const loggerProvider = new StabilityLoggerProvider({
         ...getLoggerProviderConfigFromEnv(),
         resource: this._resource,
         processors: this._loggerProviderConfig.logRecordProcessors,
         meterProvider: sdkMetricsEnabled ? this._meterProvider : undefined,
+        minimumStability:
+          this._configuration?.loggerMinimumStability ??
+          this._configuration?.minimumStability,
       });
 
       this._loggerProvider = loggerProvider;
