@@ -71,6 +71,7 @@ export const STABILITY_WRAPPER_SYMBOL = Symbol.for(
  * @experimental
  */
 export interface AttributeEnabledOptions {
+  context?: Context;
   stability?: Stability;
 }
 
