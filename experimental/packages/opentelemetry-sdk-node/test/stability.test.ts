@@ -539,6 +539,12 @@ describe('Instrumentation Stability API (@opentelemetry/sdk-node)', () => {
           .attributeEnabled('dev.attr', Stability.DEVELOPMENT),
         true
       );
+      assert.strictEqual(
+        devProvider
+          .getTracer('t')
+          .attributeEnabled('dev.attr', { stability: Stability.DEVELOPMENT }),
+        true
+      );
 
       const noProcessors = new StabilityTracerProvider({
         minimumStability: Stability.DEVELOPMENT,

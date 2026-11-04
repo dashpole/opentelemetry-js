@@ -36,6 +36,7 @@ export {
   wrapMeterWithStability,
 } from './stability';
 export type {
+  AttributeEnabledOptions,
   StabilitySpanOptions,
   StabilityTracerEnabledOptions,
   StabilityTracer,

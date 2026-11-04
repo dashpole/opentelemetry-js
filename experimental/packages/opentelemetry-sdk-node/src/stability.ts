@@ -23,6 +23,7 @@ import {
 import type { InstrumentationScope } from '@opentelemetry/core';
 import { isTracingSuppressed } from '@opentelemetry/core';
 import type {
+  AttributeEnabledOptions,
   StabilityCounter,
   StabilityGauge,
   StabilityHistogram,
@@ -79,6 +80,7 @@ export {
   wrapMeterWithStability,
 };
 export type {
+  AttributeEnabledOptions,
   StabilitySpanOptions,
   StabilityTracerEnabledOptions,
   StabilityTracer,
@@ -166,10 +168,10 @@ export class StabilityTracerProvider extends TracerProvider {
 
       baseTracer.attributeEnabled = (
         _attributeKey: string,
-        stability?: Stability
+        options?: AttributeEnabledOptions | Stability
       ): boolean =>
         this._hasSpanProcessors &&
-        isStabilityEnabled(stability, this.minimumStability);
+        isStabilityEnabled(options, this.minimumStability);
 
       baseTracer.startSpan = (
         spanName: string,
@@ -577,12 +579,12 @@ export class StabilityMeterProvider extends MeterProvider {
 
       baseMeter.attributeEnabled = (
         attributeKey: string,
-        stability?: Stability
+        options?: AttributeEnabledOptions | Stability
       ): boolean => {
         if (!this._hasReaders) {
           return false;
         }
-        if (isStabilityEnabled(stability, this.minimumStability)) {
+        if (isStabilityEnabled(options, this.minimumStability)) {
           return true;
         }
         // stability < minimumStability: enabled only if an active View
@@ -796,7 +798,7 @@ export class StabilityLoggerProvider extends LoggerProvider {
 
       baseLogger.attributeEnabled = (
         _attributeKey: string,
-        stability?: Stability
+        options?: AttributeEnabledOptions | Stability
       ): boolean => {
         const internals = baseLogger as unknown as {
           _loggerConfig: { enabled: boolean };
@@ -808,7 +810,7 @@ export class StabilityLoggerProvider extends LoggerProvider {
         ) {
           return false;
         }
-        return isStabilityEnabled(stability, this.minimumStability);
+        return isStabilityEnabled(options, this.minimumStability);
       };
 
       baseLogger.emit = (logRecord: StabilityLogRecord): void => {

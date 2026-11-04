@@ -65,10 +65,27 @@ export const STABILITY_WRAPPER_SYMBOL = Symbol.for(
 );
 
 /**
- * Normalize an optional Stability value, defaulting to Stability.STABLE.
+ * Options for `attributeEnabled()` on `StabilityTracer`, `StabilityMeter`,
+ * and `StabilityLogger`.
+ *
+ * @experimental
  */
-export function normalizeStability(stability?: Stability): Stability {
-  return stability === Stability.DEVELOPMENT
+export interface AttributeEnabledOptions {
+  stability?: Stability;
+}
+
+/**
+ * Normalize an optional Stability value or `AttributeEnabledOptions`,
+ * defaulting to Stability.STABLE.
+ */
+export function normalizeStability(
+  stability?: Stability | AttributeEnabledOptions
+): Stability {
+  const s =
+    typeof stability === 'object' && stability !== null
+      ? stability.stability
+      : stability;
+  return s === Stability.DEVELOPMENT
     ? Stability.DEVELOPMENT
     : Stability.STABLE;
 }
@@ -78,7 +95,7 @@ export function normalizeStability(stability?: Stability): Stability {
  * exceeds `minimumStability` (defaulting to Stability.STABLE).
  */
 export function isStabilityEnabled(
-  stability?: Stability,
+  stability?: Stability | AttributeEnabledOptions,
   minimumStability?: Stability
 ): boolean {
   return normalizeStability(stability) >= normalizeStability(minimumStability);
@@ -164,7 +181,10 @@ export interface StabilityTracer extends Tracer {
    * before computing or attaching `Stability.DEVELOPMENT` attributes.
    * Additional optional parameters may be added in the future.
    */
-  attributeEnabled(attributeKey: string, stability?: Stability): boolean;
+  attributeEnabled(
+    attributeKey: string,
+    options?: AttributeEnabledOptions | Stability
+  ): boolean;
 }
 
 /**
@@ -284,7 +304,10 @@ export interface StabilityMeter extends Meter {
    * before computing or attaching `Stability.DEVELOPMENT` attributes.
    * Additional optional parameters may be added in the future.
    */
-  attributeEnabled(attributeKey: string, stability?: Stability): boolean;
+  attributeEnabled(
+    attributeKey: string,
+    options?: AttributeEnabledOptions | Stability
+  ): boolean;
 }
 
 /**
@@ -327,7 +350,10 @@ export interface StabilityLogger extends Logger {
    * before computing or attaching `Stability.DEVELOPMENT` attributes.
    * Additional optional parameters may be added in the future.
    */
-  attributeEnabled(attributeKey: string, stability?: Stability): boolean;
+  attributeEnabled(
+    attributeKey: string,
+    options?: AttributeEnabledOptions | Stability
+  ): boolean;
 }
 
 /**
@@ -439,19 +465,22 @@ export function wrapTracerWithStability(
       return true;
     },
 
-    attributeEnabled(attributeKey: string, stability?: Stability): boolean {
+    attributeEnabled(
+      attributeKey: string,
+      options?: AttributeEnabledOptions | Stability
+    ): boolean {
       const delegate = resolveDelegate();
       if (delegate !== tracer && delegate[STABILITY_WRAPPER_SYMBOL]) {
         return (delegate as StabilityTracer).attributeEnabled(
           attributeKey,
-          stability
+          options
         );
       }
       // No-op Tracer (e.g. no TracerProvider registered) or no SpanProcessors.
       if (delegate instanceof NoopTracerClass || !hasSpanProcessors()) {
         return false;
       }
-      return isStabilityEnabled(stability, minimumStability);
+      return isStabilityEnabled(options, minimumStability);
     },
 
     startSpan(
@@ -550,19 +579,22 @@ export function wrapLoggerWithStability(
       return delegate.enabled(delegateOpts);
     },
 
-    attributeEnabled(attributeKey: string, stability?: Stability): boolean {
+    attributeEnabled(
+      attributeKey: string,
+      options?: AttributeEnabledOptions | Stability
+    ): boolean {
       const delegate = resolveDelegate();
       if (delegate !== logger && delegate[STABILITY_WRAPPER_SYMBOL]) {
         return (delegate as StabilityLogger).attributeEnabled(
           attributeKey,
-          stability
+          options
         );
       }
       // No-op Logger (e.g. no LoggerProvider registered).
       if (delegate === NOOP_LOGGER) {
         return false;
       }
-      return isStabilityEnabled(stability, minimumStability);
+      return isStabilityEnabled(options, minimumStability);
     },
 
     emit(logRecord: StabilityLogRecord): void {
@@ -757,12 +789,15 @@ export function wrapMeterWithStability(
     removeBatchObservableCallback:
       meter.removeBatchObservableCallback.bind(meter),
 
-    attributeEnabled(_attributeKey: string, stability?: Stability): boolean {
+    attributeEnabled(
+      _attributeKey: string,
+      options?: AttributeEnabledOptions | Stability
+    ): boolean {
       // No-op Meter (e.g. no MeterProvider registered).
       if (meter === NOOP_METER) {
         return false;
       }
-      return isStabilityEnabled(stability, minimumStability);
+      return isStabilityEnabled(options, minimumStability);
     },
   };
 

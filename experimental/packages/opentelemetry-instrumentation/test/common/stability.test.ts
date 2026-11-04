@@ -263,6 +263,12 @@ describe('Stability API (@opentelemetry/instrumentation)', () => {
           signal.attributeEnabled('dev.attr', Stability.DEVELOPMENT),
           false
         );
+        assert.strictEqual(
+          signal.attributeEnabled('dev.attr', {
+            stability: Stability.DEVELOPMENT,
+          }),
+          false
+        );
       }
     });
 
@@ -273,6 +279,12 @@ describe('Stability API (@opentelemetry/instrumentation)', () => {
       for (const signal of [tracer, meter, logger]) {
         assert.strictEqual(
           signal.attributeEnabled('dev.attr', Stability.DEVELOPMENT),
+          true
+        );
+        assert.strictEqual(
+          signal.attributeEnabled('dev.attr', {
+            stability: Stability.DEVELOPMENT,
+          }),
           true
         );
       }

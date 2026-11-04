@@ -30,6 +30,7 @@ export {
   StabilityLoggerProvider,
 } from './stability';
 export type {
+  AttributeEnabledOptions,
   StabilitySpanOptions,
   StabilityTracerEnabledOptions,
   StabilityTracer,
